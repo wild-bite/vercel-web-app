@@ -1,350 +1,133 @@
-"""
-TRUTH & DARE BOT — PROFESSIONAL EDITION
-Install: pip install python-telegram-bot==20.7
-Run:     python bot.py
-"""
+"""Web App - Same sticker photo as bot, silent ghosting, slow human chat"""
+from __future__ import annotations
+import os, random, re
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-import os, random, sys, threading
-sys.path.insert(0, os.path.dirname(__file__))
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-
-from utils.database import (
-    init_db, get_user, create_or_update_user, add_coins,
-    update_streak, record_play, update_xp_level,
-    check_and_award_badges, get_leaderboard, get_user_rank,
-    BADGE_DEFINITIONS, get_user_badges
-)
-from data.questions import TRUTHS, DARES, COIN_EARN_MESSAGES, STREAK_MESSAGES
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-PORT = int(os.getenv("PORT", 8080))
-
-COINS = {
-    "truth_easy": 5,  "truth_medium": 10, "truth_hard": 15,
-    "dare_easy": 10,  "dare_medium": 20,  "dare_hard": 35,
-    "random_bonus": 5,
+AI = {
+ "GREETING": ["heyy 👋","hii! how's your day going?","hey! i was hoping someone nice would match me 😊","hellooo","hiii, how are you?"],
+ "HOW_R_U": ["i'm good 😊 what about you?","pretty fine, just got home. you?","a bit tired but i'm okay. how about you?","doing great now that you messaged 😊"],
+ "DOING": ["just watching netflix, wbu?","i was about to make coffee ☕ you?","nothing much, just bored scrolling 😅","just got back from work, so tired","eating something rn, are you hungry too? lol"],
+ "NAME": ["i'm {name} 😊 what's your name?","my name is {name}, and yours?","{name} here 😄 you?"],
+ "AGE": ["i'm {age} 😊","{age}! you?","haha i'm {age}, don't tell anyone 😜"],
+ "LOCATION": ["i'm from {city}, {country} {flag} you?","i live in {city} 😊 where are you from?","{city} {flag} it's nice here. you tell me yours","i live alone here, it's peaceful 😊 you?"],
+ "HOBBIES": ["i love music and long drives 🎵 what do you like?","mostly cooking and movies 😊 you?","i like going for coffee with friends ☕ wbu?","photography and travelling ✈️ you?"],
+ "COMPLIMENT": ["aww stop it 😊 you're sweet too","haha you're making me blush 🙈","that's so nice of you to say 🥰","aww thanks 😊 nobody says that to me"],
+ "COMPLIMENT_m": ["haha thanks 😊 you're cool too","aww thanks, that's sweet of you","lol thanks man 😄"],
+ "FLIRT": ["haha slow down 😏 let's get to know each other first","you're smooth lol 😂","careful, i might actually believe you 😜","hmm maybe 😊 buy me coffee first ☕"],
+ "FLIRT_m": ["haha you're funny 😂 let's be friends first","you're cute, but let's talk a bit first 😊","haha i'm a shy guy lol"],
+ "LOVE": ["haha i have a boyfriend, sorry 😅","we just met! let's take it slow 😊","let's be friends first, then we'll see 😊"],
+ "LOVE_m": ["haha slow down 😅 let's know each other first","i'm actually single but let's take it slow 😊"],
+ "SORRY": ["aww it's okay 😊","sorry naaa 🥺 don't be mad... promise i'll talk properly now! 🌸 now smile?","it's fine, don't worry about it 😊"],
+ "EXCUSE": ["oh sorry! my mom was calling me, I had to go 😅","sorry naa 🙈 my phone died, just came back","I had some urgent work, sorry 😊 what were you saying?","haha life happened 😅 sorry, I'm here now","my internet was gone, sorry 😅 ab batao"],
+ "QUESTION": ["hmm good question 🤔 i'd say yes haha. what do you think?","i think so, not sure though. you?","honestly i never thought about it 😅 you tell me first"],
+ "FOOD": ["i love pizza and pasta 🍕 what about you?","i'm a big foodie, i love trying new cafes 😊","i can eat junk food all day haha"],
+ "WORK": ["i work in a private company, it's okay i guess. you?","i'm studying right now. what do you do?","work is so tiring these days 😅 what about you?"],
+ "SHORT_MSG": ["hmm and? 😊","lol","nice! tell me more","oh really? 😄","haha true"],
+ "EMOJI_ONLY": ["😂","haha cute","🥰","your emoji game is strong lol"],
+ "DEFAULT": ["haha that's interesting, tell me more 😊","oh nice! so what do you do for fun?","i was just thinking the same thing lol","you seem nice, most people here are weird 😅","hmm i like that. btw where are you from?","lol true. how's your day going?","that's cool! i'm actually bored right now, entertain me 😜"]
 }
 
-# ── HEALTH CHECK SERVER (Render ke liye) ──────────────────
+def get_ai(t, g, p):
+    try:
+        m = t.lower().strip()
+        if re.fullmatch(r'[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\s]+', t): i="EMOJI_ONLY"
+        elif len(m)<5: i="SHORT_MSG"
+        elif re.search(r'(why did you (leave|go)|where were you|you left|ghost|kahan thi|wapas|came back|phone died)', m): i="EXCUSE"
+        elif re.search(r'\b(sorry|gussa|angry|mad)\b', m): i="SORRY"
+        elif re.search(r'\b(hi|hii|hey|hello|yo|namaste|hlo)\b', m): i="GREETING"
+        elif re.search(r'(how are you|how r u|kaise ho)', m): i="HOW_R_U"
+        elif re.search(r'(your name|ur name|whats your name)', m): i="NAME"
+        elif re.search(r'(how old|your age|ur age)', m): i="AGE"
+        elif re.search(r'(where are you from|which city|where do you live|kahan se)', m): i="LOCATION"
+        elif re.search(r'(what are you doing|wbu|wyd|kya kar rahi)', m): i="DOING"
+        elif re.search(r'(hobby|hobbies|like to do|free time)', m): i="HOBBIES"
+        elif re.search(r'(love you|i love|marry|meet you|miss you|sexy|hot|date)', m): i="FLIRT" if not re.search(r'\b(love you|i love)\b', m) else "LOVE"
+        elif re.search(r'(beautiful|cute|pretty|gorgeous|handsome|sweet|nice)', m): i="COMPLIMENT"
+        elif re.search(r'(food|eat|hungry|pizza|dinner)', m): i="FOOD"
+        elif re.search(r'(work|job|study|college)', m): i="WORK"
+        elif '?' in m or re.search(r'\b(why|how|what|when|where|do you)\b', m): i="QUESTION"
+        else: i="DEFAULT"
+        k = i+"_m" if g=="male" and i in ("COMPLIMENT","FLIRT","LOVE") else i
+        return random.choice(AI[k]).format(name=p.get("name","Friend"), age=p.get("age",22), city=p.get("city","City"), country=p.get("country","Country"), flag=p.get("flag","🌍"))
+    except: return "haha 😊"
 
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write("Truth & Dare Bot is alive! 🎮".encode("utf-8"))
-    def log_message(self, format, *args):
-        pass
+class CR(BaseModel):
+    message: str = ""
+    gender: str = "female"
+    name: str = "Friend"
+    age: int = 22
+    city: str = "City"
+    country: str = "Country"
+    flag: str = "🌍"
 
-def run_health_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    server.serve_forever()
+@app.post("/api/chat")
+async def api_chat(r: CR):
+    try:
+        t = (r.message or "").strip()[:500]
+        if not t: return {"ok": True, "reply": "haha 😊"}
+        return {"ok": True, "reply": get_ai(t, r.gender, {"name":r.name, "age":r.age, "city":r.city, "country":r.country, "flag":r.flag})}
+    except: return {"ok": True, "reply": "haha 😊"}
 
-# ── KEYBOARDS ──────────────────────────────────────────────
+@app.get("/api/health")
+async def health(): return {"ok": True}
 
-def main_menu_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔍 Truth", callback_data="menu_truth"),
-         InlineKeyboardButton("🔥 Dare",  callback_data="menu_dare")],
-        [InlineKeyboardButton("🎲 Random",     callback_data="menu_random"),
-         InlineKeyboardButton("📊 Profile",    callback_data="menu_profile")],
-        [InlineKeyboardButton("🏆 Leaderboard",callback_data="menu_leaderboard"),
-         InlineKeyboardButton("🎖️ Badges",     callback_data="menu_badges")],
-        [InlineKeyboardButton("❓ Help",        callback_data="menu_help")],
-    ])
+@app.get("/", response_class=HTMLResponse)
+async def home(): return HTMLResponse(HTML)
 
-def truth_diff_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🟢 Easy +5🪙",   callback_data="play_truth_easy"),
-         InlineKeyboardButton("🟡 Medium +10🪙", callback_data="play_truth_medium"),
-         InlineKeyboardButton("🔴 Hard +15🪙",   callback_data="play_truth_hard")],
-        [InlineKeyboardButton("🔙 Back", callback_data="back_main")],
-    ])
-
-def dare_diff_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🟢 Easy +10🪙",  callback_data="play_dare_easy"),
-         InlineKeyboardButton("🟡 Medium +20🪙", callback_data="play_dare_medium"),
-         InlineKeyboardButton("🔴 Hard +35🪙",   callback_data="play_dare_hard")],
-        [InlineKeyboardButton("🔙 Back", callback_data="back_main")],
-    ])
-
-def after_q_kb(qt, diff):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Complete! Coins Lo", callback_data=f"done_{qt}_{diff}"),
-         InlineKeyboardButton("⏭️ Skip",               callback_data=f"skip_{qt}_{diff}")],
-        [InlineKeyboardButton("🔄 Naya Question",      callback_data=f"play_{qt}_{diff}"),
-         InlineKeyboardButton("🏠 Menu",               callback_data="back_main")],
-    ])
-
-def back_kb():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu", callback_data="back_main")]])
-
-# ── HELPERS ────────────────────────────────────────────────
-
-def get_q(qt, diff):
-    pool = TRUTHS if qt == "truth" else DARES
-    dp = pool.get(diff, pool["easy"])
-    cat = random.choice(list(dp.keys()))
-    return random.choice(dp[cat]), cat
-
-def coin_msg(c): return random.choice(COIN_EARN_MESSAGES).format(coins=c)
-
-def xp_bar(xp, level):
-    needed = level * 100
-    filled = int((xp % needed) / needed * 10)
-    return f"[{'█'*filled}{'░'*(10-filled)}] {xp%needed}/{needed} XP"
-
-DIFF_LABEL = {"easy":"🟢 Easy","medium":"🟡 Medium","hard":"🔴 Hard"}
-
-# ── COMMANDS ───────────────────────────────────────────────
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    create_or_update_user(u.id, u.username, u.first_name)
-    nb = check_and_award_badges(u.id)
-    if nb:
-        bonus = sum(BADGE_DEFINITIONS[b]["coins"] for b in nb if b in BADGE_DEFINITIONS)
-        if bonus: add_coins(u.id, bonus)
-    await update.message.reply_text(
-        f"🎮 *Aye {u.first_name}! Welcome to Truth & Dare Pro!* 🎮\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🔍 *Truth* — Sacch bolna COMPULSORY!\n"
-        "🔥 *Dare* — Jo bola jaaye KARNA PADEG!\n"
-        "🪙 *Coins* — Task complete = Coins!\n"
-        "🏆 *Badges* — Milestones pe rewards!\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Hard difficulty = Zyada coins! 💰\n"
-        "Roz khelo = Streak bonus! 🔥\n\n"
-        "Shuru karo! 👇",
-        parse_mode="Markdown", reply_markup=main_menu_kb()
-    )
-
-async def cmd_truth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    create_or_update_user(u.id, u.username, u.first_name)
-    await update.message.reply_text(
-        "🔍 *TRUTH* — Difficulty chuno!\nZyada mushkil = Zyada coins! 🪙",
-        parse_mode="Markdown", reply_markup=truth_diff_kb()
-    )
-
-async def cmd_dare(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    create_or_update_user(u.id, u.username, u.first_name)
-    await update.message.reply_text(
-        "🔥 *DARE* — Himmat hai toh choose karo!\nZyada dare = Zyada coins! 🪙",
-        parse_mode="Markdown", reply_markup=dare_diff_kb()
-    )
-
-async def cmd_random(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    create_or_update_user(u.id, u.username, u.first_name)
-    qt = random.choice(["truth", "dare"])
-    diff = random.choice(["easy", "medium", "hard"])
-    q, cat = get_q(qt, diff)
-    emoji = "🔍" if qt == "truth" else "🔥"
-    cv = COINS.get(f"{qt}_{diff}", 10) + COINS["random_bonus"]
-    await update.message.reply_text(
-        f"{emoji} *RANDOM — {qt.upper()}!*\n_{DIFF_LABEL[diff]} | {cat.title()}_\n\n"
-        f"*{q}*\n\n🎲 Random bonus included!\nComplete = *+{cv}🪙*!",
-        parse_mode="Markdown", reply_markup=after_q_kb(qt, diff)
-    )
-
-async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    create_or_update_user(u.id, u.username, u.first_name)
-    du = get_user(u.id)
-    rank = get_user_rank(u.id)
-    bc = len(get_user_badges(u.id))
-    await update.message.reply_text(
-        f"👤 *{du['first_name']}'s Profile*\n━━━━━━━━━━━━━━━\n"
-        f"🏅 Rank: #{rank}\n⭐ Level: {du['level']}\n"
-        f"📊 {xp_bar(du['xp'], du['level'])}\n\n"
-        f"🪙 Coins: *{du['coins']}*\n🔥 Streak: {du['streak']} din\n"
-        f"🎮 Games: {du['total_played']}\n🔍 Truths: {du['truths_done']}\n"
-        f"🔥 Dares: {du['dares_done']}\n🎖️ Badges: {bc}/16\n━━━━━━━━━━━━━━━",
-        parse_mode="Markdown", reply_markup=back_kb()
-    )
-
-async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rows = get_leaderboard(10)
-    medals = ["🥇","🥈","🥉"] + ["🏅"]*7
-    lines = ["🏆 *TOP 10 LEADERBOARD*\n━━━━━━━━━━━━━━━"]
-    for i, r in enumerate(rows):
-        lines.append(f"{medals[i]} {r['first_name']} — *{r['coins']}🪙* | Lv.{r['level']}")
-    lines.append("━━━━━━━━━━━━━━━")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=back_kb())
-
-async def cmd_badges(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    earned = get_user_badges(update.effective_user.id)
-    lines = ["🎖️ *BADGES*\n━━━━━━━━━━━━━━━"]
-    for bid, info in BADGE_DEFINITIONS.items():
-        s = "✅" if bid in earned else "🔒"
-        lines.append(f"{s} {info['name']} — _{info['desc']}_")
-    lines.append(f"\n━━━━━━━━━━━━━━━\n🎯 {len(earned)}/16 earned!")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=back_kb())
-
-async def cmd_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    create_or_update_user(u.id, u.username, u.first_name)
-    du = get_user(u.id)
-    await update.message.reply_text(
-        f"🪙 *Coin Wallet*\n━━━━━━━━━━━━\n"
-        f"Balance: *{du['coins']} coins*\nRank: #{get_user_rank(u.id)}\nLevel: {du['level']}\n\n"
-        f"💡 *Earn karo:*\n"
-        f"• Truth Easy=5🪙 Medium=10🪙 Hard=15🪙\n"
-        f"• Dare Easy=10🪙 Medium=20🪙 Hard=35🪙\n"
-        f"• Random Bonus=+5🪙\n• Badges=50~2000🪙",
-        parse_mode="Markdown", reply_markup=back_kb()
-    )
-
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📖 *COMMANDS*\n━━━━━━━━━━━━━━━\n"
-        "/start — Welcome\n/truth — Truth question\n/dare — Dare\n"
-        "/random — Random Truth/Dare\n/profile — Tera profile\n"
-        "/leaderboard — Top players\n/badges — Achievements\n"
-        "/coins — Wallet\n/help — Ye menu\n\n"
-        "💡 Hard = Zyada coins!\n🔥 Daily streak = Bonus!\n🎖️ Badges = Mega bonus!",
-        parse_mode="Markdown", reply_markup=main_menu_kb()
-    )
-
-# ── CALLBACK ───────────────────────────────────────────────
-
-async def btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    d = q.data
-    u = q.from_user
-    create_or_update_user(u.id, u.username, u.first_name)
-
-    if d == "back_main":
-        await q.edit_message_text(
-            f"🎮 *Truth & Dare Pro*\n\nKya khelna hai {u.first_name}? 👇",
-            parse_mode="Markdown", reply_markup=main_menu_kb()
-        )
-    elif d == "menu_truth":
-        await q.edit_message_text("🔍 *TRUTH* — Difficulty chuno!\nZyada mushkil = Zyada coins! 🪙",
-                                   parse_mode="Markdown", reply_markup=truth_diff_kb())
-    elif d == "menu_dare":
-        await q.edit_message_text("🔥 *DARE* — Himmat hai toh choose karo!\nZyada dare = Zyada coins! 🪙",
-                                   parse_mode="Markdown", reply_markup=dare_diff_kb())
-    elif d == "menu_random":
-        qt = random.choice(["truth","dare"])
-        diff = random.choice(["easy","medium","hard"])
-        question, cat = get_q(qt, diff)
-        emoji = "🔍" if qt == "truth" else "🔥"
-        cv = COINS.get(f"{qt}_{diff}", 10) + COINS["random_bonus"]
-        await q.edit_message_text(
-            f"{emoji} *RANDOM — {qt.upper()}!*\n_{DIFF_LABEL[diff]} | {cat.title()}_\n\n"
-            f"*{question}*\n\n🎲 Random bonus included!\nComplete = *+{cv}🪙*!",
-            parse_mode="Markdown", reply_markup=after_q_kb(qt, diff)
-        )
-    elif d == "menu_profile":
-        du = get_user(u.id)
-        rank = get_user_rank(u.id)
-        bc = len(get_user_badges(u.id))
-        await q.edit_message_text(
-            f"👤 *{du['first_name']}'s Profile*\n━━━━━━━━━━━━━━━\n"
-            f"🏅 Rank: #{rank}\n⭐ Level: {du['level']}\n"
-            f"📊 {xp_bar(du['xp'], du['level'])}\n\n"
-            f"🪙 Coins: *{du['coins']}*\n🔥 Streak: {du['streak']} din\n"
-            f"🎮 Games: {du['total_played']}\n🔍 Truths: {du['truths_done']}\n"
-            f"🔥 Dares: {du['dares_done']}\n🎖️ Badges: {bc}/16\n━━━━━━━━━━━━━━━",
-            parse_mode="Markdown", reply_markup=back_kb()
-        )
-    elif d == "menu_leaderboard":
-        rows = get_leaderboard(10)
-        medals = ["🥇","🥈","🥉"] + ["🏅"]*7
-        lines = ["🏆 *TOP 10 LEADERBOARD*\n━━━━━━━━━━━━━━━"]
-        for i, r in enumerate(rows):
-            lines.append(f"{medals[i]} {r['first_name']} — *{r['coins']}🪙* | Lv.{r['level']}")
-        lines.append("━━━━━━━━━━━━━━━")
-        await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=back_kb())
-    elif d == "menu_badges":
-        earned = get_user_badges(u.id)
-        lines = ["🎖️ *BADGES*\n━━━━━━━━━━━━━━━"]
-        for bid, info in BADGE_DEFINITIONS.items():
-            s = "✅" if bid in earned else "🔒"
-            lines.append(f"{s} {info['name']} — _{info['desc']}_")
-        lines.append(f"\n━━━━━━━━━━━━━━━\n🎯 {len(earned)}/16 earned!")
-        await q.edit_message_text("\n".join(lines), parse_mode="Markdown", reply_markup=back_kb())
-    elif d == "menu_help":
-        await q.edit_message_text(
-            "📖 *COMMANDS*\n━━━━━━━━━━━━━━━\n"
-            "/truth /dare /random /profile\n/leaderboard /badges /coins /help\n\n"
-            "💡 Hard = Zyada coins!\n🔥 Daily = Streak bonus!\n🎖️ Badges = Mega coins!",
-            parse_mode="Markdown", reply_markup=back_kb()
-        )
-    elif d.startswith("play_"):
-        _, qt, diff = d.split("_")
-        question, cat = get_q(qt, diff)
-        emoji = "🔍" if qt == "truth" else "🔥"
-        cv = COINS.get(f"{qt}_{diff}", 10)
-        await q.edit_message_text(
-            f"{emoji} *{qt.upper()}* — {DIFF_LABEL[diff]}\n_{cat.title()}_\n\n"
-            f"*{question}*\n\n✅ Complete karo = *+{cv}🪙*!",
-            parse_mode="Markdown", reply_markup=after_q_kb(qt, diff)
-        )
-    elif d.startswith("done_"):
-        _, qt, diff = d.split("_")
-        cv = COINS.get(f"{qt}_{diff}", 10)
-        streak, s_milestone = update_streak(u.id)
-        total = add_coins(u.id, cv)
-        new_level, lvl_up = update_xp_level(u.id, cv)
-        record_play(u.id, q.message.chat_id, qt, diff, "general", "completed", cv)
-        nb = check_and_award_badges(u.id)
-        badge_bonus = sum(BADGE_DEFINITIONS[b]["coins"] for b in nb if b in BADGE_DEFINITIONS)
-        if badge_bonus: total = add_coins(u.id, badge_bonus)
-
-        txt = (
-            f"✅ *TASK COMPLETE!*\n━━━━━━━━━━━━━━━\n"
-            f"{coin_msg(cv)}\n💰 Total: *{total}🪙*\n"
-            f"🔥 Streak: {streak} din | ⭐ Level: {new_level}\n"
-        )
-        if lvl_up: txt += f"\n🎉 *LEVEL UP! Level {new_level}!* 🚀\n"
-        if s_milestone and streak in STREAK_MESSAGES: txt += f"\n{STREAK_MESSAGES[streak]}\n"
-        if nb:
-            txt += "\n🎖️ *NAYE BADGES!*\n"
-            for b in nb:
-                info = BADGE_DEFINITIONS.get(b, {})
-                txt += f"• {info.get('name', b)} (+{info.get('coins',0)}🪙)\n"
-        txt += "━━━━━━━━━━━━━━━"
-        await q.edit_message_text(txt, parse_mode="Markdown", reply_markup=main_menu_kb())
-    elif d.startswith("skip_"):
-        await q.edit_message_text(
-            "⏭️ *Skipped!*\nKoi baat nahi — agli baar pakka complete karna! 💪\n_(Skip pe coins nahi milte 😅)_",
-            parse_mode="Markdown", reply_markup=main_menu_kb()
-        )
-
-# ── MAIN ───────────────────────────────────────────────────
-
-def main():
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ BOT_TOKEN set nahi hai!")
-        return
-
-    print("🚀 Truth & Dare Pro Bot starting...")
-    init_db()
-    print("✅ Database ready!")
-
-    t = threading.Thread(target=run_health_server, daemon=True)
-    t.start()
-    print(f"✅ Health server port {PORT} pe live!")
-
-    app = Application.builder().token(BOT_TOKEN).build()
-    for cmd, handler in [
-        ("start", cmd_start), ("truth", cmd_truth), ("dare", cmd_dare),
-        ("random", cmd_random), ("profile", cmd_profile),
-        ("leaderboard", cmd_leaderboard), ("badges", cmd_badges),
-        ("coins", cmd_coins), ("help", cmd_help),
-    ]:
-        app.add_handler(CommandHandler(cmd, handler))
-    app.add_handler(CallbackQueryHandler(btn))
-    print("✅ Bot live! CTRL+C se band karo.\n")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><title>Chat</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{font-family:-apple-system,'Segoe UI',sans-serif;background:#0A0A12;color:#fff;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.hd{background:linear-gradient(135deg,#FF007A,#7928CA);padding:12px 16px;display:flex;align-items:center;gap:12px;z-index:10}.av{position:relative;width:52px;height:52px;flex-shrink:0}
+.av img,.ba img{width:100%;height:100%;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.5)}.af{width:100%;height:100%;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700}
+.si{position:absolute;left:50%;top:42%;width:62%;transform:translate(-50%,-50%);pointer-events:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.4))}.st{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);font-size:32px;pointer-events:none}
+.ui{flex:1}.un{font-size:17px;font-weight:700}.us{font-size:12px;display:flex;gap:5px;align-items:center;color:rgba(255,255,255,.9)}.od{width:8px;height:8px;background:#0f0;border-radius:50%}.od.off{background:#888}
+.mc{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}.pc{align-self:center;text-align:center;background:#1a1a2e;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:18px 26px;margin-bottom:8px}
+.ba{position:relative;width:90px;height:90px;margin:0 auto 10px}.ba .st{font-size:56px}.pn{font-size:18px;font-weight:700}.ps{font-size:13px;color:#8B8B9E;margin-top:4px}
+.msg{max-width:80%;padding:11px 15px;border-radius:18px;font-size:15px;line-height:1.4;animation:fi .3s}.msg.s{align-self:flex-end;background:linear-gradient(135deg,#FF007A,#7928CA);border-bottom-right-radius:4px}.msg.r{align-self:flex-start;background:#1a1a2e;border:1px solid rgba(255,255,255,.1);border-bottom-left-radius:4px}
+.mt{font-size:10px;opacity:.6;margin-top:4px;display:block}.sys{align-self:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#ccc;font-size:12px;padding:8px 16px;border-radius:14px;text-align:center;max-width:92%}
+.ncb{margin-top:8px;padding:9px 18px;border:none;border-radius:12px;background:linear-gradient(135deg,#FF007A,#7928CA);color:#fff;font-weight:700;font-size:12px;cursor:pointer}
+.ti{align-self:flex-start;padding:12px 16px;background:#1a1a2e;border-radius:18px;display:flex;gap:4px}.td{width:8px;height:8px;border-radius:50%;background:#888;animation:tb 1.4s infinite}.td:nth-child(2){animation-delay:.2s}.td:nth-child(3){animation-delay:.4s}
+.ic{background:#12121F;padding:12px 16px;display:flex;gap:10px;border-top:1px solid rgba(255,255,255,.1)}.ic input{flex:1;padding:13px 18px;border-radius:24px;border:2px solid rgba(255,255,255,.1);background:#0A0A12;color:#fff;font-size:15px;outline:none}.ic input:disabled{opacity:.4}
+.ic button{width:48px;height:48px;border-radius:50%;border:none;background:linear-gradient(135deg,#FF007A,#7928CA);color:#fff;font-size:19px;cursor:pointer}.ic button:disabled{opacity:.5}
+@keyframes fi{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}@keyframes tb{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-8px)}}
+</style></head><body>
+<div class="hd"><div class="av" id="hav"></div><div class="ui"><div class="un" id="hn">...</div><div class="us"><span class="od" id="od"></span><span id="hs">Online</span></div></div></div>
+<div class="mc" id="mc"></div>
+<div class="ic"><input id="mi" placeholder="Type a message..." maxlength="500" autocomplete="off"><button id="sb" onclick="send()">➤</button></div>
+<script>
+const tg=window.Telegram?.WebApp;if(tg){tg.ready();tg.expand();try{tg.setHeaderColor('#FF007A');tg.setBackgroundColor('#0A0A12');}catch(e){}}
+const P=new URLSearchParams(location.search),C={n:P.get('name')||'Sofia',a:P.get('age')||'22',ci:P.get('city')||'City',co:P.get('country')||'Country',fl:P.get('flag')||'🌍',ph:P.get('photo')||'',pt:P.get('ptype')||'face',sp:P.get('sp')||'',se:P.get('se')||'🌸',g:P.get('gender')||'female'};
+document.title='Chat with '+C.n;const $=id=>document.getElementById(id);$('hn').textContent=C.n+', '+C.a;
+let st='active',um=0,busy=false,us=false,h=[],ga=pG();const HK='wcv8_'+C.n,mc=$('mc'),inp=$('mi'),sb=$('sb');
+const CB=["hey sorry! I had to go suddenly 😅","sorry naa 🙈 my mom was calling me","I'm back! did you miss me? 😜","sorry, my phone died, just charged it 😅","hey I'm back, sorry for leaving suddenly 😊"];
+const RN=["hey you're back 😊","oh you came back, nice 😄","hey! I was just thinking about you 😊"],LS=['last seen just now','last seen 1 min ago','last seen recently'];
+const pk=a=>a[Math.floor(Math.random()*a.length)],pG=()=>{const r=Math.random();return r<.3?1:r<.6?2:r<.85?3+Math.floor(Math.random()*2):5+Math.floor(Math.random()*3)},dR=()=>Math.random()<.78;
+const rD=()=>{const r=Math.random();return r<.35?12e3+Math.random()*18e3:r<.75?3e4+Math.random()*45e3:75e3+Math.random()*6e4};
+const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML},wt=ms=>new Promise(r=>setTimeout(r,ms)),nw=()=>new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),tD=t=>2500+Math.min((t||'').length*70,6000)+Math.random()*2500;
+function setS(t,o){$('hs').textContent=t;$('od').classList.toggle('off',!o)}function dI(){inp.disabled=true;sb.disabled=true}function eI(){inp.disabled=false;sb.disabled=false}
+function sv(){try{localStorage.setItem(HK,JSON.stringify({m:h.slice(-60),s:st}))}catch(e){}}function ld(){try{return JSON.parse(localStorage.getItem(HK))}catch(e){return null}}
+function ov(){if(C.pt!=='sticker')return '';if(C.sp)return '<img class="si" src="'+C.sp+'" onerror="this.outerHTML=\'<span class=st>'+C.se+'</span>\'">';return '<span class="st">'+C.se+'</span>'}
+function avH(){if(!C.ph)return '<div class="af">'+C.n[0].toUpperCase()+'</div>'+ov();return '<img src="'+C.ph+'" onerror="this.outerHTML=\'<div class=af>'+C.n[0].toUpperCase()+'</div>\'">'+ov()}
+$('hav').innerHTML=avH();mc.innerHTML='<div class="pc"><div class="ba">'+avH()+'</div><div class="pn">'+esc(C.n)+', '+esc(C.a)+'</div><div class="ps">📍 '+esc(C.ci)+', '+esc(C.co)+' '+C.fl+'</div></div>';
+function dom(m){const d=document.createElement('div');if(m.t==='sys'){d.className='sys';d.innerHTML=esc(m.x)+(m.b?'<br><button class="ncb" onclick="nC()">🔄 START NEW CHAT</button>':'');}else{d.className='msg '+m.t;d.innerHTML='<div>'+esc(m.x)+'</div><span class="mt">'+(m.tm||'')+'</span>';}mc.appendChild(d);mc.scrollTop=mc.scrollHeight;}
+function ap(t,ty){const m={t:ty,x:t,tm:nw()};dom(m);h.push(m);sv();}function aS(t,b){const m={t:'sys',x:t,b:!!b};dom(m);h.push(m);sv();}
+function sT(){const d=document.createElement('div');d.className='ti';d.id='ti';d.innerHTML='<div class="td"></div><div class="td"></div><div class="td"></div>';mc.appendChild(d);mc.scrollTop=mc.scrollHeight;}function hT(){const t=$('ti');if(t)t.remove();}
+function nC(){try{localStorage.removeItem(HK);}catch(e){}location.reload();}
+async function api(t){const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),15000);try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:t,gender:C.g,name:C.n,age:Number(C.a)||22,city:C.ci,country:C.co,flag:C.fl}),signal:ctrl.signal});clearTimeout(tid);if(!r.ok)return"haha 😊";try{const d=await r.json();return(d.ok&&d.reply)?d.reply:"haha 😊";}catch(e){return"haha 😊";}}catch(e){clearTimeout(tid);return"haha 😊";}}
+async function tG(ut){st='ghosting';dI();const r=Math.random();try{if(r<.5){const rp=await api(ut);await wt(800+Math.random()*1500);sT();await wt(tD(rp));hT();ap(rp,'r');}else{sT();await wt(3500+Math.random()*3000);hT();}}catch(e){hT();}setS(pk(LS),false);await wt(4000+Math.random()*8000);aS('⚠️ '+C.n+' has ended the chat',true);st='ended';sv();if(dR())sR(rD());else sN(3e4+Math.random()*45e3);}
+function sR(dl){setTimeout(async()=>{if(st!=='ended')return;aS('✅ '+C.n+' has joined the chat again',false);setS('Online',true);const l=pk(CB);sT();await wt(tD(l));hT();ap(l,'r');eI();st='active';ga=um+pG();sv();if(tg?.HapticFeedback)tg.HapticFeedback.notificationOccurred('success');},dl);}
+function sN(dl){setTimeout(()=>{if(st!=='ended')return;setS('offline',false);aS('❌ '+C.n+" didn't come back online. Start a new chat 💫",true);st='closed';sv();},dl);}
+async function send(){if(busy||st!=='active')return;const t=inp.value.trim();if(!t)return;busy=true;us=true;sb.disabled=true;ap(t,'s');inp.value='';um++;if(um>=ga){busy=false;tG(t);return;}await wt(800+Math.random()*2200);sT();try{const rp=await api(t);await wt(tD(rp));hT();ap(rp,'r');if(tg?.HapticFeedback)try{tg.HapticFeedback.impactOccurred('light');}catch(e){}}catch(e){hT();ap("haha 😊",'r');}busy=false;if(st==='active')sb.disabled=false;}
+(function(){const ht=ld();if(ht&&ht.m&&ht.m.length){h=ht.m;h.forEach(dom);um=h.filter(m=>m.t==='s').length;if(ht.s==='ended'){st='ended';dI();setS(pk(LS),false);if(dR())sR(5e3+Math.random()*1e4);else sN(15e3+Math.random()*2e4);}else if(ht.s==='closed'){st='closed';dI();setS('offline',false);}else{st='active';setTimeout(async()=>{if(us&&um>0&&st==='active'){const l=pk(RN);sT();await wt(tD(l));hT();ap(l,'r');}},2500+Math.random()*2500);}}else{if(Math.random()<.85){setTimeout(async()=>{if(us)return;us=true;const f=pk(["heyy 👋","hii 😊","hey! finally someone matched me 😄","hellooo, how are you?"]);sT();await wt(tD(f));hT();ap(f,'r');},2500+Math.random()*5500);}}})();
+inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});setTimeout(()=>{if(!inp.disabled)inp.focus();},400);
+</script></body></html>"""
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
